@@ -1,0 +1,75 @@
+version: 2.1
+
+executors:
+  node-executor:
+    docker:
+      - image: cimg/node:16.20
+    resource_class: medium
+
+jobs:
+  build-and-test:
+    executor: node-executor
+    steps:
+      - checkout
+
+      - run:
+          name: Measure start time
+          command: echo "START_TIME=$(date +%s)" >> $BASH_ENV
+
+      - run:
+          name: Install dependencies
+          command: npm install
+
+      - run:
+          name: Install pidstat (sysstat) for CPU/Memory monitoring
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y sysstat
+
+      - run:
+          name: Start app in background & measure time to first response + monitor CPU/mem
+          command: |
+            # Start app in background
+            npm start &
+            APP_PID=$!
+
+            # Start pidstat to monitor app PID, sampling tiap 1 detik selama max 30 detik
+            pidstat -r -u -p $APP_PID 1 30 > usage.log &
+            PIDSTAT_PID=$!
+
+            # Wait for the app to respond (poll localhost:3000)
+            TIMEOUT=30
+            SECONDS=0
+            until curl -s http://localhost:3000 > /dev/null; do
+              if [ $SECONDS -ge $TIMEOUT ]; then
+                echo "App did not respond within $TIMEOUT seconds."
+                kill $APP_PID $PIDSTAT_PID
+                exit 1
+              fi
+              sleep 1
+            done
+
+            echo "App responded after $SECONDS seconds."
+            echo "TIME_TO_FIRST_RESPONSE=$SECONDS" >> $BASH_ENV
+
+            # Stop pidstat and kill app
+            kill $PIDSTAT_PID
+            kill $APP_PID
+
+      - run:
+          name: Measure end time and calculate total pipeline time
+          command: |
+            END_TIME=$(date +%s)
+            source $BASH_ENV
+            TOTAL_TIME=$((END_TIME - START_TIME))
+            echo "Total pipeline time: $TOTAL_TIME seconds"
+            echo "Time to first response: $TIME_TO_FIRST_RESPONSE seconds"
+
+      - store_artifacts:
+          path: usage.log
+          destination: cpu-memory-usage
+
+workflows:
+  build_and_test:
+    jobs:
+      - build-and-test
