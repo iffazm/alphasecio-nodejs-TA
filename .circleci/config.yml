@@ -30,7 +30,7 @@ jobs:
           name: Start app in background & measure time to first response + monitor CPU/mem
           command: |
             # Start app in background
-            npm start &
+            npm start > app.log 2>&1 &
             APP_PID=$!
 
             # Start pidstat to monitor app PID, sampling tiap 1 detik selama max 30 detik
@@ -64,6 +64,16 @@ jobs:
             TOTAL_TIME=$((END_TIME - START_TIME))
             echo "Total pipeline time: $TOTAL_TIME seconds"
             echo "Time to first response: $TIME_TO_FIRST_RESPONSE seconds"
+
+      - run:
+          name: Curl app to verify response content
+          command: |
+            npm start > app.log 2>&1 &
+            APP_PID=$!
+            sleep 3
+            echo ">>> Response from app:"
+            curl -s http://localhost:3000
+            kill $APP_PID
 
       - store_artifacts:
           path: usage.log
